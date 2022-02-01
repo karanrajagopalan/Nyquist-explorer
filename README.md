@@ -11,3 +11,4 @@ Can use any nc (netCDF4) file as the input. You can visualize
 
 Other features included,
  Visualizing the frequency spectrum for the specified timeline. USe the built in plotly zoom function in the time domain plot.
+![image](https://user-images.githubusercontent.com/58655145/152064393-7f79bb10-c885-4c0b-8296-bdfb81df0ff4.png)

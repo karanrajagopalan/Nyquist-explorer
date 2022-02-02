@@ -301,13 +301,4 @@ def plot_filter(filter_type, n_fft, fs, fc_1, fc_2):
     return fig, fig2, filter_mem_data
 
 
-# @app.callback(
-#     Output(),
-#     [
-#         Input(),
-#         Input()
-#     ]
-# )
-
-
 app.run_server(debug=False)

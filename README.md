@@ -1,6 +1,6 @@
 # Nyquist explorer
  
-Can use any nc (netCDF4) file as the input. You can visualize 
+Nyquist explorer is a simple vibration analysis tool with basic functionalities. You can use any nc (netCDF4) file as the input. You can visualize 
  1. Raw time domain plot
  2. Frequency spectral plot
  3. Apply FIR filter with some of the common window functions. Supported filter types

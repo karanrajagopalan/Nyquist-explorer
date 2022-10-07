@@ -10,6 +10,7 @@ from scipy import signal
 
 external_stylesheets = [dbc.themes.BOOTSTRAP]
 app = dash.Dash(__name__, external_stylesheets=external_stylesheets)
+server = app.server
 
 app.layout = html.Div(
     [
@@ -300,5 +301,5 @@ def plot_filter(filter_type, n_fft, fs, fc_1, fc_2):
     }
     return fig, fig2, filter_mem_data
 
-
-app.run_server(debug=False)
+# if __name__ == '__main__':
+#     app.run_server(debug=True, host ='0.0.0.0', port = 8050)

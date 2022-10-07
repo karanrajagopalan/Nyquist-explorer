@@ -33,7 +33,9 @@ def parse_contents(contents, filename):
             # Assume that the user uploaded an excel file
             df = pd.read_excel(io.BytesIO(decoded))
         elif 'nc' in filename:
-            temp = xr.open_dataset(io.BytesIO(decoded)).load()
+            # temp = xr.open_dataset(io.BytesIO(decoded),engine='h5netcdf').load()
+            ncdata = Dataset("in-mem-file",mode='r',memory=decoded)
+            temp = xr.open_dataset(xr.backends.NetCDF4DataStore(ncdata))
             # print(temp)
             df = temp
             # print(df)

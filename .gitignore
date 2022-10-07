@@ -1,3 +1,6 @@
 
 _pychache_
 *.pyc
+*.idea
+.venv
+*.pyc

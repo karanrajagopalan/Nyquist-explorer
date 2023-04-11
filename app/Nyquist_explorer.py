@@ -6,6 +6,7 @@ from dash.exceptions import PreventUpdate
 from utils import parse_contents, calculate_fft, get_ftaps
 import pandas as pd
 import plotly.graph_objects as go
+import matplotlib.pyplot as plt
 from scipy import signal
 
 external_stylesheets = [dbc.themes.BOOTSTRAP]
@@ -31,7 +32,7 @@ app.layout = html.Div(
                         )
                     ],
                     style={'width': '20%', 'display': 'inline-block', 'vertical-align': 'top', 'marginRight': '4px',
-                           'marginLeft': '2px', 'height': '91vh'}
+                           'marginLeft': '2px', 'height': '100%'}
                 ),
                 dcc.Store(id="memory1"),
                 dcc.Store(id="filter_mem"),
@@ -48,7 +49,10 @@ app.layout = html.Div(
                                                           style={"height": "42vh", "marginBottom": "4px"}),
                                                 dcc.Graph(id="graph_2", style={"height": "42vh"})
                                             ]),
-                                            dbc.Tab(label="Spectrogram"),
+                                            dbc.Tab(label="Spectrogram", children=[
+                                                dcc.Graph(id="graph_spec",
+                                                          style={"height": "85vh"})
+                                            ]),
                                         ]
                                     )
                                 ]
@@ -190,6 +194,7 @@ def update_td_plot(mem_data, selected_var, fs, fil_val, fil_taps):
 
 @app.callback(
     Output('graph_2', 'figure'),
+    Output("graph_spec", "figure"),
     [Input("memory1", "data"),
      Input("var_list_radio", "value"),
      Input("fs", "value"),
@@ -225,6 +230,8 @@ def update_fd_plot(mem_data, selected_var, fs, nfft, relayoutData, filt_x):
             )
         )
     )
+    freqs, t, Pxx = signal.spectrogram(np.array(var_data[start:end]),fs=fs,nfft=fs, window=signal.get_window("hamming", fs, fftbins=True))
+
     if filt_x["filtered"] is not None:
         fft_filt = calculate_fft(np.array(filt_x["filtered"][start:end]), nfft, fs)
         fig.add_trace(
@@ -238,11 +245,26 @@ def update_fd_plot(mem_data, selected_var, fs, nfft, relayoutData, filt_x):
                 )
             )
         )
+        freqs, t, Pxx = signal.spectrogram(np.array(filt_x["filtered"][start:end]), fs=fs, nfft=fs, window=signal.get_window("hamming", fs, fftbins=True))
 
     fig.update_layout(xaxis_rangeslider_visible=False,
                       margin=dict(l=10, r=10, t=20, b=20),
                       legend=dict(yanchor="top", y=1, xanchor="left", x=0))
-    return fig
+
+    # Plot with plotly
+    trace = [go.Heatmap(
+        x=t,
+        y=freqs,
+        z=10 * np.log10(Pxx),
+        colorscale='Jet',
+    )]
+    layout = go.Layout(
+        yaxis=dict(title='Frequency'),  # x-axis label
+        xaxis=dict(title='Time'),  # y-axis label
+    )
+    fig2 = go.Figure(data=trace, layout=layout)
+
+    return fig, fig2
 
 
 @app.callback(Output("graph_3", "figure"),
@@ -301,5 +323,5 @@ def plot_filter(filter_type, n_fft, fs, fc_1, fc_2):
     }
     return fig, fig2, filter_mem_data
 
-# if __name__ == '__main__':
-#     app.run_server(debug=True, host ='0.0.0.0', port = 8050)
+if __name__ == '__main__':
+    app.run_server(debug=False, host ='0.0.0.0', port = 8050)

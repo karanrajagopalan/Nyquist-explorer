@@ -104,13 +104,13 @@ file_details = html.Div(
         html.Div(
             id="metadata",
             children=[],
-            style={"height": "25vh", "maxHeight": "25vh", "overflow": "scroll"}
+            style={"height": "24vh", "maxHeight": "24vh", "overflow": "scroll"}
         ),
         html.H6("Data variables"),
         html.Div(
             id="variable_list",
             children=[],
-            style={"height": "20vh", "maxHeight": "20vh", "overflow": "scroll"},
+            style={"height": "24vh", "maxHeight": "24vh", "overflow": "scroll"},
         ),
         html.H6("Variable contents"),
         html.Div(

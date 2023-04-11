@@ -5,6 +5,12 @@
 
 `git clone https://github.com/karanrajagopalan/Nyquist-explorer.git`
 
+You can choose one of the below methods to run the app
+
+1. run the app from your local setup by installing the required version of python and the needed packages 
+(or)
+2. run the app as a docker container by building its docker image. You'll need to install docker in that case.
+
 ### Running locally
 * Install python3.9.13 from  `https://www.python.org/downloads/release/python-3913/`
 * Go to terminal / command prompt, install poetry

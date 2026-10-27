@@ -1,0 +1,6 @@
+.git
+.venv
+.venv-py39-backup
+.python
+.poetry
+**/__pycache__

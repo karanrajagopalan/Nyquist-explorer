@@ -1,0 +1,374 @@
+html,
+body,
+#react-entry-point,
+#_dash-app-content {
+    height: 100%;
+    margin: 0;
+}
+
+body {
+    overflow: hidden;
+}
+
+.app-shell {
+    box-sizing: border-box;
+    height: 100vh;
+    height: 100dvh;
+    padding: 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    overflow: hidden;
+}
+
+.app-header {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+}
+
+.app-logo {
+    /* Turns the white logo background black, then screen-blends it away. */
+    filter: invert(1) hue-rotate(180deg);
+    mix-blend-mode: screen;
+    display: block;
+    width: clamp(64px, 8vw, 110px);
+    height: auto;
+    flex-shrink: 0;
+}
+
+.app-brand {
+    min-width: 0;
+}
+
+.app-header h3 {
+    font-family: "Cambria Math", "STIX Two Math", "Noto Sans Math", "Segoe UI Symbol", sans-serif;
+    margin-bottom: 0.25rem;
+}
+
+.app-header p {
+    margin: 0;
+}
+
+.workspace {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 2.4fr) minmax(0, 1.2fr);
+    gap: 0.75rem;
+}
+
+@media (min-width: 992px) {
+    .workspace.settings-collapsed {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 3.6fr);
+    }
+
+    .workspace.settings-collapsed > .settings-panel {
+        display: none;
+    }
+}
+
+.settings-toggle {
+    flex: 0 0 auto;
+}
+
+.workspace-panel,
+.plots-card,
+.plots-loading,
+.plot-tabs,
+.plots-loading .tab-content,
+.plots-loading .tab-pane,
+.time-spectrum-plots,
+.analysis-graph {
+    min-width: 0;
+    min-height: 0;
+}
+
+.workspace-panel {
+    overflow-wrap: anywhere;
+}
+
+.recording-panel,
+.settings-panel {
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+}
+
+.recording-panel {
+    display: block;
+    padding: 0.75rem;
+}
+
+.plots-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    overflow: hidden;
+}
+
+.analysis-status {
+    flex: 0 1 auto;
+    max-height: 25%;
+    overflow: auto;
+    scrollbar-gutter: stable;
+}
+
+.analysis-status .alert {
+    margin: 0.25rem 0 0;
+}
+
+.plots-card {
+    flex: 1;
+    overflow: hidden;
+}
+
+.plots-loading {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+.plot-tabs {
+    flex-shrink: 0;
+}
+
+.plots-loading > .tab-content {
+    flex: 1;
+    overflow: auto;
+    overscroll-behavior: contain;
+}
+
+.plots-loading .tab-pane.active,
+.plots-loading .tab-pane.active > div,
+.analysis-graph {
+    height: 100%;
+}
+
+.time-spectrum-plots {
+    height: 100%;
+    display: grid;
+    grid-template-rows: minmax(180px, 1fr) minmax(180px, 1fr);
+}
+
+.analysis-graph {
+    min-height: 180px;
+}
+
+.filter-graph {
+    height: clamp(150px, 24vh, 220px);
+    width: 100%;
+}
+
+.settings-panel {
+    padding: 0.6rem;
+    border: 1px solid #444;
+    border-radius: 0.375rem;
+    font-size: 0.8rem;
+    background: #2b2b2b;
+}
+
+.settings-heading {
+    margin: 0.55rem 0 0.35rem;
+    padding-bottom: 0.2rem;
+    border-bottom: 1px solid #444;
+    font-size: 0.8rem;
+    font-weight: 700;
+}
+
+.settings-panel > div:first-child > .settings-heading:first-child {
+    margin-top: 0;
+}
+
+.settings-field {
+    display: grid;
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1fr);
+    align-items: center;
+    gap: 0.4rem;
+    margin-bottom: 0.2rem;
+}
+
+.settings-label,
+.settings-switch {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    min-width: 0;
+}
+
+.settings-label .form-label {
+    margin: 0;
+}
+
+.settings-field .form-control,
+.settings-field .form-select {
+    min-width: 0;
+    min-height: 28px;
+    padding-top: 0.15rem;
+    padding-bottom: 0.15rem;
+    font-size: 0.8rem;
+}
+
+.settings-info-wrapper {
+    display: inline-flex;
+    flex-shrink: 0;
+}
+
+.settings-info {
+    display: inline-flex;
+    justify-content: center;
+    align-items: center;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: 1px solid #adb5bd;
+    border-radius: 50%;
+    background: transparent;
+    color: #ced4da;
+    font-size: 0.7rem;
+    font-weight: 600;
+    cursor: help;
+}
+
+.settings-info:focus-visible {
+    outline: 2px solid #0d6efd;
+    outline-offset: 2px;
+}
+
+.settings-tooltip .tooltip-inner {
+    max-width: min(280px, calc(100vw - 24px));
+    padding: 0.45rem 0.6rem;
+    text-align: left;
+    font-size: 0.8rem;
+}
+
+.settings-reset {
+    display: block;
+    margin: 0 0 0.4rem auto;
+    padding: 0.1rem 0.4rem;
+    font-size: 0.75rem;
+}
+
+.settings-switch {
+    margin-bottom: 0.25rem;
+}
+
+.settings-switch .form-check {
+    min-height: 0;
+    margin: 0;
+}
+
+.settings-summary {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    margin-bottom: 0.25rem;
+    color: #ced4da;
+    font-size: 0.72rem;
+}
+
+.settings-panel .alert {
+    margin-bottom: 0.4rem;
+    padding: 0.35rem !important;
+    font-size: 0.78rem;
+}
+
+.filter-preview {
+    border-top: 1px solid #444;
+    padding-top: 0.4rem;
+    margin-top: 0.4rem;
+}
+
+.filter-preview summary {
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.filter-preview .nav-link {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
+}
+
+.workspace-navigation {
+    display: none;
+}
+
+@media (max-width: 991.98px) {
+    .app-header p {
+        display: none;
+    }
+
+    .settings-toggle {
+        display: none;
+    }
+
+    .workspace-navigation {
+        display: flex;
+        flex: 0 0 auto;
+        gap: 0.5rem;
+    }
+
+    .workspace-navigation label {
+        flex: 1;
+        text-align: center;
+        padding: 0.4rem;
+        border: 1px solid #ced4da;
+        border-radius: 0.375rem;
+        cursor: pointer;
+    }
+
+    .workspace-navigation input {
+        margin-right: 0.35rem;
+    }
+
+    .workspace {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .workspace > .workspace-panel {
+        display: none;
+    }
+
+    .workspace-recording > .recording-panel,
+    .workspace-settings > .settings-panel {
+        display: block;
+    }
+
+    .workspace-plots > .plots-panel {
+        display: flex;
+    }
+}
+
+/* Light-grey surfaces for inputs and dropdowns on the dark theme */
+:root {
+    --Dash-Fill-Inverse-Strong: #d0d3d8;
+    --Dash-Fill-Interactive-Weak: #bfc3c9;
+    --Dash-Fill-Disabled: #a9adb3;
+    --Dash-Text-Strong: #1f2328;
+    --Dash-Text-Weak: #4b5058;
+    --Dash-Stroke-Weak: #9ca0a6;
+    --Dash-Stroke-Strong: #6c7079;
+}
+
+.form-control,
+.form-select,
+.form-control:focus,
+.form-select:focus,
+.form-control:disabled,
+.form-select:disabled {
+    background-color: #d0d3d8;
+    color: #1f2328;
+    border-color: #9ca0a6;
+}
+
+.form-control:disabled,
+.form-select:disabled {
+    background-color: #a9adb3;
+    opacity: 0.8;
+}
+
+.form-control::placeholder {
+    color: #5c6169;
+}

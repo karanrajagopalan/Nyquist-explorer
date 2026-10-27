@@ -1,2 +1,4 @@
-FILTERS = ['boxcar', 'triang', 'parzen', 'bohman', 'blackman', 'nuttall', 'blackmanharris', 'flattop', 'bartlett',
-           'hanning', 'barthann', 'hamming', 'kaiser', 'cosine', 'hann', 'exponential', 'tukey', 'taylor']
+FILTERS = [
+    "boxcar", "hann", "hamming", "blackman", "blackmanharris", "flattop",
+    "bartlett", "kaiser",
+]

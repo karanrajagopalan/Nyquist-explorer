@@ -3,4 +3,7 @@ _pychache_
 *.pyc
 *.idea
 .venv
+.venv-py39-backup/
+.poetry/
+.python/
 *.pyc

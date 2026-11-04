@@ -76,7 +76,7 @@ def compact_feedback(identifier, summary, description):
 files_location = dcc.Upload(
     id="upload",
     children=html.Div(["Drop a file here or ", html.A("choose a file")]),
-    accept=".nc,.csv",
+    accept=".nc,.csv,.mat",
     multiple=False,
     style={
         "padding": "1rem", "border": "1px dashed #6c757d",
@@ -87,8 +87,9 @@ files_location = dcc.Upload(
 file_details = html.Div(
     [
         html.Div(id="upload_feedback", className="mt-2", role="status"),
-        html.H6("Signal channel", className="mt-3"),
-        dcc.Dropdown(id="var_list_radio", options=[], placeholder="Upload a recording", clearable=False),
+        html.H6("Signal channels", className="mt-3"),
+        dcc.Dropdown(id="var_list_radio", options=[], multi=True, placeholder="Upload a recording",
+                     clearable=False),
         html.Div(id="variable_content", className="small mt-3", style={"overflowWrap": "anywhere"}),
         html.Details([html.Summary("File metadata"), html.Div(id="metadata", className="small mt-2")],
                      className="mt-3"),
@@ -114,6 +115,10 @@ right_panel = html.Div(
             {"label": "PSD", "value": "psd"},
         ], "raw", "Raw: unnormalized FFT magnitude. Amplitude: single-sided peak amplitude. "
            "PSD: power spectral density in signal-units squared per Hz."),
+        dropdown("Frequency axis", "freq_unit", [
+            {"label": "Hz", "value": "hz"},
+            {"label": "RPM", "value": "rpm"},
+        ], "hz", "Show the spectrum frequency axis in Hz or RPM (1 Hz = 60 RPM)."),
         html.H6("Spectrogram", className="settings-heading"),
         numeric_input("Window samples", "spec_window", 256, minimum=2, step=1,
                       help_text="Hamming window length in samples. Short intervals reduce this automatically."),

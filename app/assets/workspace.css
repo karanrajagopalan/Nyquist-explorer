@@ -153,6 +153,29 @@ body {
     grid-template-rows: minmax(180px, 1fr) minmax(180px, 1fr);
 }
 
+.spectrogram-plots {
+    height: 100%;
+    display: grid;
+    grid-template-rows: auto minmax(180px, 1fr);
+}
+
+.spectrogram-channels {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.25rem 0.75rem;
+    padding: 0.5rem 0.75rem 0;
+    font-size: 0.85rem;
+}
+
+.spectrogram-channel-label {
+    font-weight: 600;
+}
+
+.spectrogram-channel-options .dash-options-list-option {
+    color: #f8f9fa;
+}
+
 .analysis-graph {
     min-height: 180px;
 }

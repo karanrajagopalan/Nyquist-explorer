@@ -1,4 +1,5 @@
 import base64
+import io
 import runpy
 import sys
 import tempfile
@@ -10,12 +11,14 @@ import numpy as np
 from dash import no_update
 from netCDF4 import Dataset
 from scipy import signal
+from scipy.io import savemat
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
 
 from Nyquist_explorer import (
     app, filter_control_visibility, plot_filter, render_signal, update_channel_details,
     select_workspace, update_automatic_taps, update_channels, update_fd_plot, update_memory,
+    update_spectrogram_channel,
 )
 from utils import (
     apply_filter, automatic_fir_settings, calculate_spectrogram, calculate_spectrum, get_ftaps,
@@ -48,6 +51,42 @@ class UploadTests(unittest.TestCase):
         self.assertEqual(list(data["data_vars"]), ["vibration"])
         self.assertEqual(data["data_vars"]["vibration"]["data"], [1, 2, 3])
         self.assertEqual(len(data["skipped"]), 2)
+
+    def test_csv_with_daq_preamble(self):
+        text = (
+            "Title:,run_1,,\nParameters:,,,\n,,,\nFrequency,Limit,2000,\nNumber,of,Blocks,4\n"
+            "Legend,Channel1,Channel2,\n,,,\nVolts/Unit,1,1,\nData,,,\n1,2,\n3,4,\n5,6,\n"
+        )
+        data = parse_contents(upload_contents(text.encode()), "daq.csv")
+        self.assertEqual(list(data["data_vars"]), ["Channel1", "Channel2"])
+        self.assertEqual(data["data_vars"]["Channel2"]["data"], [2, 4, 6])
+        self.assertEqual(data["data_vars"]["Channel1"]["attrs"], {"Fs": "5120.0"})
+        self.assertEqual(data["attrs"]["Title"], "run_1")
+        self.assertEqual(data["attrs"]["Frequency Limit"], "2000")
+
+    def test_mat_vectors_become_channels_and_scalars_metadata(self):
+        buffer = io.BytesIO()
+        savemat(buffer, {
+            "X1_DE_time": np.arange(5.0).reshape(-1, 1), "X1RPM": np.array([[1797]]),
+            "matrix": np.ones((3, 3)), "label": "text",
+        })
+        data = parse_contents(upload_contents(buffer.getvalue()), "bearing.MAT")
+        self.assertEqual(list(data["data_vars"]), ["X1_DE_time"])
+        self.assertEqual(data["data_vars"]["X1_DE_time"]["data"], [0, 1, 2, 3, 4])
+        self.assertEqual(data["attrs"], {"X1RPM": "1797"})
+        self.assertEqual(len(data["skipped"]), 2)
+
+    def test_invalid_mat_is_rejected(self):
+        with self.assertRaises(ValueError):
+            parse_contents(upload_contents(b"not a mat file"), "bad.mat")
+
+    def test_bundled_bearing_file_loads(self):
+        path = Path(__file__).resolve().parents[1] / "data" / "48k_drive_end" / "IR007_0.mat"
+        if not path.exists():
+            self.skipTest("bearing data not downloaded")
+        data = parse_contents(upload_contents(path.read_bytes()), path.name)
+        self.assertEqual(list(data["data_vars"]), ["X109_DE_time", "X109_FE_time"])
+        self.assertEqual(data["attrs"], {"X109RPM": "1796"})
 
     def test_netcdf_metadata_and_unsupported_channels(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -255,10 +294,73 @@ class CallbackTests(unittest.TestCase):
         params = dict(
             memory=self.memory, selected="signal", fs=64, nfft=8, selection=None,
             interval_mode="full", filtered_data=self.filtered, spectrum_mode="raw",
-            spec_window=16, spec_nfft=32, spec_overlap=50, spec_source="raw",
+            spec_window=16, spec_nfft=32, spec_overlap=50, spec_source="raw", freq_unit="hz",
         )
         params.update(overrides)
         return update_fd_plot(**params)
+
+    def multi_memory(self):
+        memory = recording()
+        channels = memory["data"]["data_vars"]
+        channels["second"] = {"data": np.cos(2 * np.pi * 4 * np.arange(64) / 64).tolist(),
+                              "attrs": {"Fs": "64", "units": "V"}}
+        return memory
+
+    def test_multiple_channels_are_overlaid(self):
+        memory, names = self.multi_memory(), ["signal", "second"]
+        figure, filtered, feedback, summary = render_signal(memory, names, 64, True, self.filter_data, 0)
+        self.assertEqual([trace.name for trace in figure.data],
+                         ["signal", "signal (filtered)", "second", "second (filtered)"])
+        self.assertEqual(figure.layout.yaxis.title.text, "Amplitude (mixed units)")
+        self.assertEqual(filtered["context"], [memory["id"], names, 64])
+        self.assertIn("signal, second", summary)
+        spectrum, spectrogram, feedback = self.analyze(memory=memory, selected=names, filtered_data=filtered)
+        self.assertEqual([trace.name for trace in spectrum.data], [trace.name for trace in figure.data])
+        self.assertEqual(len(spectrogram.data), 1)
+        self.assertIn("signal", spectrogram.layout.title.text)
+
+    def test_spectrogram_channel_is_chosen_separately(self):
+        memory, names = self.multi_memory(), ["signal", "second"]
+        filtered = render_signal(memory, names, 64, False, self.filter_data, 0)[1]
+        titles = {
+            choice: self.analyze(memory=memory, selected=names, filtered_data=filtered,
+                                 spec_channel=choice)[1].layout.title.text
+            for choice in ["signal", "second", "gone", None]
+        }
+        self.assertTrue(titles["second"].endswith("second)"))
+        self.assertTrue(titles["signal"].endswith("signal)"))
+        self.assertEqual(titles["gone"], titles["signal"])
+        self.assertEqual(titles[None], titles["signal"])
+
+    def test_spectrogram_channel_options_follow_selection(self):
+        memory = self.multi_memory()
+        options, value = update_spectrogram_channel(["signal", "second"], None, memory)
+        self.assertEqual([o["value"] for o in options], ["signal", "second"])
+        self.assertEqual(value, "signal")
+        self.assertEqual(update_spectrogram_channel(["signal", "second"], "second", memory)[1], "second")
+        self.assertEqual(update_spectrogram_channel(["signal"], "second", memory)[1], "signal")
+        self.assertEqual(update_spectrogram_channel(None, None, memory), ([], None))
+
+    def test_stale_channel_selection_is_rejected(self):
+        memory = self.multi_memory()
+        filtered = render_signal(memory, ["signal"], 64, False, self.filter_data, 0)[1]
+        with self.assertLogs("Nyquist_explorer", level="WARNING"):
+            result = self.analyze(memory=memory, selected=["signal", "second"], filtered_data=filtered)
+        self.assertEqual(len(result[0].data), 0)
+
+    def test_multi_channel_details_warn_about_different_rates(self):
+        memory = self.multi_memory()
+        memory["data"]["data_vars"]["second"]["attrs"]["Fs"] = "128"
+        fs, details = update_channel_details(["signal", "second"], memory)
+        self.assertEqual(fs, 64)
+        self.assertIn("different sampling rates", str(details))
+        self.assertEqual(update_channels(memory)[1], ["signal", "second"][:1])
+
+    def test_spectrum_axis_switches_to_rpm(self):
+        hz = self.analyze()[0].data[0]
+        rpm_figure = self.analyze(freq_unit="rpm")[0]
+        np.testing.assert_allclose(rpm_figure.data[0].x, np.asarray(hz.x) * 60)
+        self.assertEqual(rpm_figure.layout.xaxis.title.text, "Frequency (RPM)")
 
     def test_initial_state_and_failed_upload_are_safe(self):
         self.assertEqual(update_channels(None)[:2], ([], None))
@@ -358,7 +460,8 @@ class CallbackTests(unittest.TestCase):
 
     def test_workspace_sections_and_stylesheet(self):
         for view in ["recording", "plots", "settings"]:
-            self.assertEqual(select_workspace(view), f"workspace workspace-{view}")
+            self.assertEqual(select_workspace(view, 0)[0], f"workspace workspace-{view}")
+        self.assertIn("settings-collapsed", select_workspace("plots", 1)[0])
         client = app.server.test_client()
         with client.get("/assets/workspace.css") as response:
             self.assertEqual(response.status_code, 200)

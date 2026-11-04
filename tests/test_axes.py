@@ -22,7 +22,7 @@ class TimeAxisTests(unittest.TestCase):
                     figure.data[0].x, np.arange(sample_count) / fs
                 )
                 np.testing.assert_array_equal(figure.data[0].y, samples)
-                self.assertEqual(filtered, {"filtered": None, "index": None})
+                self.assertEqual(filtered, {"filtered": None})
 
     def test_filtered_trace_uses_corrected_sample_times(self):
         memory = {"data": {"data_vars": {"signal": {"data": [1, 2, 3, 4]}}}}
@@ -31,8 +31,7 @@ class TimeAxisTests(unittest.TestCase):
         )
 
         np.testing.assert_allclose(figure.data[1].x, [0, 0.25, 0.5])
-        np.testing.assert_allclose(filtered["index"], [0, 0.25, 0.5])
-        np.testing.assert_allclose(filtered["filtered"], [1, 2, 3])
+        np.testing.assert_allclose(filtered["filtered"]["signal"], [1, 2, 3])
 
 
 class FrequencyAxisTests(unittest.TestCase):

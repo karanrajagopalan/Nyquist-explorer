@@ -8,6 +8,11 @@ import pandas as pd
 import scipy.fft as fft
 from netCDF4 import Dataset
 from scipy import signal
+from scipy.io import loadmat
+from scipy.io.matlab import MatReadError
+
+
+DAQ_OVERSAMPLING = 2.56  # sampling rate = 2.56 x the DAQ "Frequency Limit" (analysis bandwidth)
 
 
 def get_handle(file):
@@ -50,10 +55,59 @@ def samples_array(values, minimum=1):
     return samples.astype(float)
 
 
+def read_mat(decoded):
+    """Return the user variables of a MATLAB v4-v7.2 file as numpy arrays."""
+    try:
+        variables = loadmat(io.BytesIO(decoded))
+    except NotImplementedError as exc:
+        raise ValueError("MATLAB v7.3 (HDF5) files are not supported. Save with -v7 or earlier.") from exc
+    except (MatReadError, ValueError, TypeError, OSError, EOFError) as exc:
+        raise ValueError(f"not a valid MATLAB file ({exc})") from exc
+    return {name: np.asarray(values) for name, values in variables.items() if not name.startswith("__")}
+
+
+def read_daq_header(stream, max_lines=200):
+    """Consume a DAQ export preamble ending in a 'Data,' line.
+
+    Returns (attributes, channel_names) with the stream positioned at the first data row,
+    or None (stream rewound) when the file has no such preamble.
+    """
+    start = stream.tell()
+    attrs, names = {}, []
+    for _ in range(max_lines):
+        line = stream.readline()
+        if not line:
+            break
+        cells = [cell.strip() for cell in line.split(",")]
+        if cells[0].lower() == "data" and not any(cells[1:]):
+            return attrs, names
+        cells = [cell for cell in cells if cell]
+        if not cells:
+            continue
+        if cells[0].lower() == "legend":
+            names = cells[1:]
+        elif cells[0].endswith(":") and len(cells) > 1:
+            attrs[cells[0][:-1]] = " ".join(cells[1:])
+        elif len(cells) > 2 and is_number(cells[-1]) and not is_number(cells[1]):
+            attrs[" ".join(cells[:-1])] = cells[-1]
+        elif len(cells) > 1 and not cells[-1].endswith(":"):
+            attrs[cells[0]] = " ".join(cells[1:])
+    stream.seek(start)
+    return None
+
+
+def is_number(text):
+    try:
+        float(text)
+    except ValueError:
+        return False
+    return True
+
+
 def parse_contents(contents, filename):
     suffix = Path(filename or "").suffix.lower()
-    if suffix not in {".nc", ".csv"}:
-        raise ValueError("Unsupported file type. Upload a NetCDF (.nc) or CSV (.csv) file.")
+    if suffix not in {".nc", ".csv", ".mat"}:
+        raise ValueError("Unsupported file type. Upload a NetCDF (.nc), CSV (.csv) or MATLAB (.mat) file.")
     try:
         _, encoded = contents.split(",", 1)
         decoded = base64.b64decode(encoded, validate=True)
@@ -75,9 +129,26 @@ def parse_contents(contents, filename):
 
     try:
         if suffix == ".csv":
-            frame = pd.read_csv(io.StringIO(decoded.decode("utf-8-sig")))
-            for name in frame.columns:
-                add_channel(name, frame[name].to_numpy(), {})
+            stream = io.StringIO(decoded.decode("utf-8-sig"))
+            header = read_daq_header(stream)
+            if header:
+                attrs, names = header
+                frame = pd.read_csv(stream, header=None)
+                frame = frame.dropna(axis="columns", how="all")
+                fs = DAQ_OVERSAMPLING * float(attrs["Frequency Limit"]) if "Frequency Limit" in attrs else None
+                for column in frame.columns:
+                    name = names[column] if column < len(names) else f"Channel{column + 1}"
+                    add_channel(name, frame[column].to_numpy(), {"Fs": str(fs)} if fs else {})
+            else:
+                frame = pd.read_csv(stream)
+                for name in frame.columns:
+                    add_channel(name, frame[name].to_numpy(), {})
+        elif suffix == ".mat":
+            for name, values in read_mat(decoded).items():
+                if values.size == 1 and values.dtype.kind in "iuf":
+                    attrs[name] = str(values.item())
+                else:
+                    add_channel(name, values.squeeze() if values.ndim == 2 and 1 in values.shape else values, {})
         else:
             with Dataset("upload", mode="r", memory=decoded) as dataset:
                 attrs = {key: str(dataset.getncattr(key)) for key in dataset.ncattrs()}

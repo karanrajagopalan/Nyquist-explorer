@@ -6,6 +6,7 @@ import dash_bootstrap_components as dbc
 import numpy as np
 import plotly.graph_objects as go
 from dash import Input, Output, ctx, dcc, html
+from plotly.colors import qualitative
 from scipy import signal
 from scipy.fft import next_fast_len
 
@@ -48,16 +49,43 @@ def alert(message, color="danger"):
 
 def channel_data(memory, selected):
     if not memory:
-        raise ValueError("Upload a NetCDF or CSV recording to begin.")
+        raise ValueError("Upload a NetCDF, CSV or MATLAB recording to begin.")
     channels = memory["data"]["data_vars"]
     if selected not in channels:
         raise ValueError("Select a signal channel.")
     return channels[selected]
 
 
+def selected_channels(memory, selected):
+    """Return the selected channel names; a single name is accepted for convenience."""
+    if not memory:
+        raise ValueError("Upload a NetCDF, CSV or MATLAB recording to begin.")
+    names = [selected] if isinstance(selected, str) else list(selected or [])
+    channels = memory["data"]["data_vars"]
+    if not names or any(name not in channels for name in names):
+        raise ValueError("Select at least one signal channel.")
+    return names
+
+
 def channel_units(channel):
     attrs = channel.get("attrs", {})
     return attrs.get("units", attrs.get("unit", "a.u."))
+
+
+def units_label(memory, names):
+    units = {channel_units(channel_data(memory, name)) for name in names}
+    return units.pop() if len(units) == 1 else "mixed units"
+
+
+def channel_color(index):
+    return qualitative.Plotly[index % len(qualitative.Plotly)]
+
+
+def channel_samples(memory, name, minimum=1):
+    try:
+        return samples_array(channel_data(memory, name)["data"], minimum)
+    except ValueError as exc:
+        raise ValueError(f"{name}: {exc}") from exc
 
 
 app.layout = html.Div(
@@ -111,8 +139,17 @@ app.layout = html.Div(
                                     ], className="time-spectrum-plots"), label="Time series & spectrum",
                                         tab_id="time-spectrum"),
                                     dbc.Tab(
-                                        dcc.Graph(id="graph_spec", responsive=True, figure=empty_figure("Spectrogram appears here"),
-                                                  className="analysis-graph"),
+                                        html.Div([
+                                            html.Div([
+                                                html.Span("Spectrogram channel", className="spectrogram-channel-label"),
+                                                dcc.RadioItems(id="spec_channel", options=[], inline=True,
+                                                               className="spectrogram-channel-options",
+                                                               inputClassName="me-1", labelClassName="me-3"),
+                                            ], className="spectrogram-channels"),
+                                            dcc.Graph(id="graph_spec", responsive=True,
+                                                      figure=empty_figure("Spectrogram appears here"),
+                                                      className="analysis-graph"),
+                                        ], className="spectrogram-plots"),
                                         label="Spectrogram",
                                         tab_id="spectrogram",
                                     ),
@@ -154,7 +191,7 @@ def select_workspace(view, clicks):
 )
 def update_memory(contents, filename):
     if not contents:
-        return None, html.Small("Supported: .nc and numeric-column .csv files.")
+        return None, html.Small("Supported: .nc, .mat and numeric-column .csv files.")
     try:
         data = parse_contents(contents, filename)
     except ValueError as exc:
@@ -179,7 +216,7 @@ def update_channels(memory):
         html.Div([html.Dt(key), html.Dd(value, style={"overflowWrap": "anywhere"})])
         for key, value in attrs.items()
     ]) if attrs else "No global metadata."
-    return [{"label": name, "value": name} for name in channels], channels[0], metadata
+    return [{"label": name, "value": name} for name in channels], [channels[0]], metadata
 
 
 @app.callback(
@@ -187,25 +224,40 @@ def update_channels(memory):
     Input("var_list_radio", "value"), Input("memory1", "data"),
 )
 def update_channel_details(selected, memory):
-    if not memory or selected not in memory["data"]["data_vars"]:
-        return 50000, "Choose a channel after uploading."
-    channel = channel_data(memory, selected)
-    attrs = channel.get("attrs", {})
-    details = [html.Div(f"{len(channel['data']):,} samples; units: {channel_units(channel)}")]
-    details.extend(html.Div(f"{key}: {value}") for key, value in attrs.items())
-    if "unitscale" in attrs:
-        details.append(html.Div("Values are shown as stored; unitscale is not applied."))
-    recorded_rate = attrs.get("Fs", attrs.get("fs", attrs.get("sampling_rate")))
-    if recorded_rate is None:
-        details.append(alert("No sampling-rate metadata. Verify the default rate before analysis.", "warning"))
-        return 50000, details
     try:
-        fs = sampling_rate(recorded_rate)
-    except ValueError as exc:
-        logger.warning("Invalid channel sampling-rate metadata: %s", exc)
-        details.append(alert("Invalid sampling-rate metadata. Enter the correct rate.", "warning"))
-        return None, details
-    return fs, details
+        names = selected_channels(memory, selected)
+    except ValueError:
+        return 50000, "Choose a channel after uploading."
+    sections, fs, recorded_rates = [], None, []
+    for position, name in enumerate(names):
+        channel = channel_data(memory, name)
+        attrs = channel.get("attrs", {})
+        details = [html.Div(f"{len(channel['data']):,} samples; units: {channel_units(channel)}")]
+        details.extend(html.Div(f"{key}: {value}") for key, value in attrs.items())
+        if "unitscale" in attrs:
+            details.append(html.Div("Values are shown as stored; unitscale is not applied."))
+        recorded_rate = attrs.get("Fs", attrs.get("fs", attrs.get("sampling_rate")))
+        rate = 50000
+        if recorded_rate is None:
+            details.append(alert("No sampling-rate metadata. Verify the default rate before analysis.", "warning"))
+        else:
+            try:
+                rate = sampling_rate(recorded_rate)
+                recorded_rates.append(rate)
+            except ValueError as exc:
+                logger.warning("Invalid channel sampling-rate metadata: %s", exc)
+                details.append(alert("Invalid sampling-rate metadata. Enter the correct rate.", "warning"))
+                rate = None
+        if position == 0:
+            fs = rate
+        sections.append(details if len(names) == 1 else html.Div([html.Strong(name), *details], className="mb-2"))
+    if len(names) == 1:
+        return fs, sections[0]
+    if len(set(recorded_rates)) > 1:
+        sections.append(alert(
+            f"Selected channels have different sampling rates. {names[0]}'s rate is used for all.", "warning"
+        ))
+    return fs, sections
 
 
 @app.callback(
@@ -282,25 +334,31 @@ def plot_filter(filter_type, tap_count, fs, fc_1, fc_2, window, beta):
 
 
 def update_td_plot(mem_data, selected_var, fs, fil_val, fil_taps):
-    channel = channel_data(mem_data, selected_var)
+    names = selected_channels(mem_data, selected_var)
     fs = sampling_rate(fs)
-    values = samples_array(channel["data"])
-    figure = go.Figure(go.Scatter(
-        name="Raw measurement", x=np.arange(len(values)) / fs, y=values,
-        mode="lines", line=dict(color="#60a5fa"),
-    ))
-    filtered_data = {"filtered": None, "index": None}
+    figure = go.Figure()
+    filtered_data = {"filtered": None}
     if fil_val:
         if not fil_taps or "error" in fil_taps:
             raise ValueError((fil_taps or {}).get("error", "Configure a valid FIR filter first."))
         if "fs" in fil_taps and fil_taps["fs"] != fs:
             raise ValueError("The filter is updating for the new sampling rate.")
-        filtered, times, _ = apply_filter(values, fil_taps["taps"], fs)
+        filtered_data["filtered"] = {}
+    for index, name in enumerate(names):
+        values = channel_samples(mem_data, name)
+        color = channel_color(index)
         figure.add_trace(go.Scatter(
-            name="Filtered", x=times, y=filtered, mode="lines", line=dict(color="#f87171"),
+            name=name, x=np.arange(len(values)) / fs, y=values, mode="lines", line=dict(color=color),
         ))
-        filtered_data = {"filtered": filtered.tolist(), "index": times.tolist()}
-    return style_figure(figure, "Time series", "Time (s)", channel_units(channel)), filtered_data
+        if fil_val:
+            filtered, times, _ = apply_filter(values, fil_taps["taps"], fs)
+            figure.add_trace(go.Scatter(
+                name=f"{name} (filtered)", x=times, y=filtered, mode="lines",
+                line=dict(color=color, dash="dash"),
+            ))
+            filtered_data["filtered"][name] = filtered.tolist()
+    y_title = units_label(mem_data, names) if len(names) == 1 else f"Amplitude ({units_label(mem_data, names)})"
+    return style_figure(figure, "Time series", "Time (s)", y_title), filtered_data
 
 
 @app.callback(
@@ -313,16 +371,17 @@ def update_td_plot(mem_data, selected_var, fs, fil_val, fil_taps):
 def render_signal(memory, selected, fs, enabled, filter_data, reset):
     try:
         figure, filtered = update_td_plot(memory, selected, fs, enabled, filter_data)
-        count = len(channel_data(memory, selected)["data"])
+        names = selected_channels(memory, selected)
+        count = min(len(channel_data(memory, name)["data"]) for name in names)
         fs = sampling_rate(fs)
     except ValueError as exc:
         if memory and selected:
             logger.warning("Cannot plot signal: %s", exc)
         return empty_figure(str(exc)), {"error": str(exc)}, alert(str(exc), "warning"), "No analysis available."
-    figure.update_layout(uirevision=f"{memory['id']}:{selected}:{fs}:{reset}")
-    filtered["context"] = [memory["id"], selected, fs]
+    figure.update_layout(uirevision=f"{memory['id']}:{','.join(names)}:{fs}:{reset}")
+    filtered["context"] = [memory["id"], names, fs]
     summary = (
-        f"{selected} | {count:,} samples | {count / fs:g} s recording | "
+        f"{', '.join(names)} | {count:,} samples | {count / fs:g} s recording | "
         f"{fs:g} Hz sampling | Nyquist {fs / 2:g} Hz"
     )
     return figure, filtered, None, summary
@@ -349,28 +408,44 @@ def update_selection(relayout, memory, selected, fs, reset):
 
 
 @app.callback(
+    Output("spec_channel", "options"), Output("spec_channel", "value"),
+    Input("var_list_radio", "value"), dash.State("spec_channel", "value"), dash.State("memory1", "data"),
+)
+def update_spectrogram_channel(selected, current, memory):
+    try:
+        names = selected_channels(memory, selected)
+    except ValueError:
+        return [], None
+    return [{"label": name, "value": name} for name in names], current if current in names else names[0]
+
+
+@app.callback(
     Output("graph_2", "figure"), Output("graph_spec", "figure"),
     Output("analysis_feedback", "children"),
     Input("memory1", "data"), Input("var_list_radio", "value"), Input("fs", "value"),
     Input("nfft", "value"), Input("selection", "data"), Input("interval_mode", "value"),
     Input("filt_x_mem", "data"), Input("spectrum_mode", "value"),
     Input("spec_window", "value"), Input("spec_nfft", "value"),
-    Input("spec_overlap", "value"), Input("spec_source", "value"),
+    Input("spec_overlap", "value"), Input("spec_source", "value"), Input("freq_unit", "value"),
+    Input("spec_channel", "value"),
 )
 def update_fd_plot(memory, selected, fs, nfft, selection, interval_mode, filtered_data,
-                   spectrum_mode, spec_window, spec_nfft, spec_overlap, spec_source):
+                   spectrum_mode, spec_window, spec_nfft, spec_overlap, spec_source, freq_unit,
+                   spec_channel=None):
     try:
-        channel = channel_data(memory, selected)
+        names = selected_channels(memory, selected)
         fs = sampling_rate(fs)
         if not filtered_data or "error" in filtered_data:
             raise ValueError((filtered_data or {}).get("error", "Waiting for a valid signal."))
-        if filtered_data.get("context") != [memory["id"], selected, fs]:
-            raise ValueError("Updating analysis for the selected channel.")
-        raw = samples_array(channel["data"], minimum=2)
+        if filtered_data.get("context") != [memory["id"], names, fs]:
+            raise ValueError("Updating analysis for the selected channels.")
+        raws = {name: channel_samples(memory, name, minimum=2) for name in names}
         filtered = filtered_data["filtered"]
-        count = len(raw) if filtered is None else min(len(raw), len(filtered))
+        count = min(len(values) for values in raws.values())
+        if filtered is not None:
+            count = min(count, *(len(values) for values in filtered.values()))
         start, stop = interval_indices(count, fs, interval_mode, selection)
-        units = channel_units(channel)
+        units = units_label(memory, names)
         labels = {
             "raw": f"Raw FFT magnitude ({units}, unnormalized)",
             "amplitude": f"Peak amplitude ({units})",
@@ -379,18 +454,23 @@ def update_fd_plot(memory, selected, fs, nfft, selection, interval_mode, filtere
         if spectrum_mode not in labels:
             raise ValueError("Select a spectrum mode.")
         figure = go.Figure()
-        series = [("Raw", raw, "#60a5fa")]
-        if filtered is not None:
-            series.append(("Filtered", np.asarray(filtered), "#f87171"))
+        series = []
+        for index, name in enumerate(names):
+            series.append((name, raws[name], channel_color(index), "solid"))
+            if filtered is not None:
+                series.append((f"{name} (filtered)", np.asarray(filtered[name]), channel_color(index), "dash"))
         effective_nfft = number(nfft, "FFT length", minimum=2, integer=True)
-        for name, samples, color in series:
+        scale = 60 if freq_unit == "rpm" else 1
+        for name, samples, color, dash_style in series:
             frequencies, magnitude, effective_nfft = calculate_spectrum(
                 samples[start:stop], nfft, fs, spectrum_mode
             )
             figure.add_trace(go.Scatter(
-                name=name, x=frequencies, y=magnitude, mode="lines", line=dict(color=color),
+                name=name, x=frequencies * scale, y=magnitude, mode="lines",
+                line=dict(color=color, dash=dash_style),
             ))
-        style_figure(figure, "Frequency spectrum", "Frequency (Hz)", labels[spectrum_mode])
+        style_figure(figure, "Frequency spectrum", f"Frequency ({'RPM' if scale == 60 else 'Hz'})",
+                     labels[spectrum_mode])
     except ValueError as exc:
         if memory and selected:
             logger.warning("Cannot analyze signal: %s", exc)
@@ -403,21 +483,22 @@ def update_fd_plot(memory, selected, fs, nfft, selection, interval_mode, filtere
         + (" Raw and filtered spectra use the same available interval." if filtered is not None else ""),
         "info",
     )]
+    spec_channel = spec_channel if spec_channel in names else names[0]
     try:
         if spec_source not in {"raw", "filtered"}:
             raise ValueError("Select a spectrogram source.")
         if spec_source == "filtered" and filtered is None:
             raise ValueError("Enable a valid FIR filter to view the filtered spectrogram.")
-        source = raw if spec_source == "raw" else np.asarray(filtered)
+        source = raws[spec_channel] if spec_source == "raw" else np.asarray(filtered[spec_channel])
         frequencies, times, power_db, segment = calculate_spectrogram(
             source[start:stop], fs, spec_window, spec_nfft, spec_overlap
         )
         spectrogram = style_figure(
             go.Figure(go.Heatmap(
                 x=times + start / fs, y=frequencies, z=power_db, colorscale="Viridis",
-                colorbar=dict(title=f"dB ({units})²/Hz"),
+                colorbar=dict(title=f"dB ({units_label(memory, [spec_channel])})²/Hz"),
             )),
-            f"Spectrogram ({spec_source})", "Time (s)", "Frequency (Hz)",
+            f"Spectrogram ({spec_source}, {spec_channel})", "Time (s)", "Frequency (Hz)",
         )
         if segment < float(spec_window):
             feedback.append(alert(

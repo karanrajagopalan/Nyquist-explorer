@@ -44,6 +44,51 @@ def sampling_rate(value):
     return result
 
 
+MAX_HARMONICS = 100
+
+
+def shaft_harmonics(rpm, count, fs):
+    """Return the shaft frequency in Hz and the harmonic orders that fall below Nyquist."""
+    rpm = number(rpm, "Shaft speed")
+    if rpm <= 0:
+        raise ValueError("Shaft speed must be greater than zero.")
+    count = number(count, "Harmonics", minimum=1, integer=True)
+    if count > MAX_HARMONICS:
+        raise ValueError(f"Harmonics must be at most {MAX_HARMONICS}.")
+    nyquist = sampling_rate(fs) / 2
+    shaft_hz = rpm / 60
+    if shaft_hz >= nyquist:
+        raise ValueError("Shaft speed is at or above the Nyquist frequency.")
+    return shaft_hz, [order for order in range(1, count + 1) if order * shaft_hz < nyquist]
+
+
+def bearing_fault_frequencies(rpm):
+    """Return CWRU drive-end SKF 6205 characteristic frequencies in Hz."""
+    rpm = number(rpm, "Shaft speed")
+    if rpm <= 0:
+        raise ValueError("Shaft speed must be greater than zero.")
+    rolling_elements = 9
+    ball_diameter = 7.94
+    pitch_diameter = 39.04
+    contact_angle = np.deg2rad(0)
+    diameter_ratio = ball_diameter / pitch_diameter * np.cos(contact_angle)
+    shaft_hz = rpm / 60
+    return {
+        "FTF": 0.5 * (1 - diameter_ratio) * shaft_hz,
+        "BPFO": rolling_elements / 2 * (1 - diameter_ratio) * shaft_hz,
+        "BPFI": rolling_elements / 2 * (1 + diameter_ratio) * shaft_hz,
+        "BSF": pitch_diameter / (2 * ball_diameter) * (1 - diameter_ratio ** 2) * shaft_hz,
+    }
+
+
+def recorded_rpm(attrs):
+    """Find a shaft speed in file metadata, e.g. the 'X109RPM' variable of bearing .mat files."""
+    for key, value in (attrs or {}).items():
+        if str(key).upper().endswith("RPM") and is_number(value) and float(value) > 0:
+            return float(value)
+    return None
+
+
 def samples_array(values, minimum=1):
     samples = np.asarray(values)
     if samples.ndim != 1 or samples.dtype.kind not in "iuf":
@@ -191,6 +236,21 @@ def calculate_spectrum(values, nfft, fs, mode):
     else:
         raise ValueError("Select a spectrum mode.")
     return frequencies, magnitudes, nfft
+
+
+def bearing_fault_bin_power(values, rpm, nfft, fs):
+    """Return nearest-bin PSD power estimates and bin frequencies for bearing faults."""
+    frequencies, psd, effective_nfft = calculate_spectrum(values, nfft, fs, "psd")
+    bin_width = sampling_rate(fs) / effective_nfft
+    estimates = {}
+    for label, fault_frequency in bearing_fault_frequencies(rpm).items():
+        index = int(np.argmin(np.abs(frequencies - fault_frequency)))
+        estimates[label] = {
+            "frequency": fault_frequency,
+            "bin_frequency": float(frequencies[index]),
+            "power": float(psd[index] * bin_width),
+        }
+    return estimates, bin_width
 
 
 def interval_indices(sample_count, fs, mode, selection):

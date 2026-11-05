@@ -18,11 +18,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
 from Nyquist_explorer import (
     app, filter_control_visibility, plot_filter, render_signal, update_channel_details,
     select_workspace, update_automatic_taps, update_channels, update_fd_plot, update_memory,
-    update_spectrogram_channel,
+    right_panel, update_bearing_frequency_display, update_fault_power_display,
+    update_limit_harmonics, update_shaft_speed, update_spectrogram_channel,
 )
 from utils import (
-    apply_filter, automatic_fir_settings, calculate_spectrogram, calculate_spectrum, get_ftaps,
-    interval_indices, parse_contents, sampling_rate,
+    apply_filter, automatic_fir_settings, bearing_fault_bin_power, bearing_fault_frequencies,
+    calculate_spectrogram, calculate_spectrum, get_ftaps, interval_indices, parse_contents,
+    recorded_rpm, sampling_rate,
 )
 
 
@@ -123,6 +125,26 @@ class UploadTests(unittest.TestCase):
 
 
 class AnalysisTests(unittest.TestCase):
+    def test_bearing_fault_bin_power_uses_the_nearest_psd_bin(self):
+        fs = 64
+        samples = np.sin(2 * np.pi * 8 * np.arange(64) / fs)
+        estimates, bin_width = bearing_fault_bin_power(samples, 60, 64, fs)
+        frequencies, psd, _ = calculate_spectrum(samples, 64, fs, "psd")
+        for estimate in estimates.values():
+            index = int(np.argmin(np.abs(frequencies - estimate["frequency"])))
+            self.assertEqual(estimate["bin_frequency"], frequencies[index])
+            self.assertAlmostEqual(estimate["power"], psd[index] * bin_width)
+        self.assertEqual(bin_width, 1)
+
+    def test_cwru_bearing_fault_frequencies_use_shaft_speed(self):
+        frequencies = bearing_fault_frequencies(1752)
+        self.assertAlmostEqual(frequencies["FTF"], 11.63, places=1)
+        self.assertAlmostEqual(frequencies["BPFO"], 104.68, places=1)
+        self.assertAlmostEqual(frequencies["BPFI"], 158.12, places=1)
+        self.assertAlmostEqual(frequencies["BSF"], 68.82, places=1)
+        with self.assertRaises(ValueError):
+            bearing_fault_frequencies(0)
+
     def test_sampling_rate_allows_fractional_but_rejects_invalid_values(self):
         self.assertEqual(sampling_rate(128.5), 128.5)
         for value in [None, "", 0, -1, "nan", float("inf")]:
@@ -355,6 +377,94 @@ class CallbackTests(unittest.TestCase):
         self.assertEqual(fs, 64)
         self.assertIn("different sampling rates", str(details))
         self.assertEqual(update_channels(memory)[1], ["signal", "second"][:1])
+
+    def test_shaft_markers_follow_axis_unit_and_nyquist(self):
+        def lines(**overrides):
+            figure, _, feedback = self.analyze(**overrides)
+            return [(shape.x0, a.text) for shape, a in zip(figure.layout.shapes, figure.layout.annotations)], feedback
+
+        markers, feedback = lines(shaft_rpm=600, shaft_harmonics_count=3)
+        self.assertEqual(markers, [(10, "1X"), (20, "2X"), (30, "3X")])
+        self.assertIn("Shaft speed 600 RPM (10 Hz)", str(feedback))
+        self.assertEqual([x for x, _ in lines(shaft_rpm=600, shaft_harmonics_count=2, freq_unit="rpm")[0]],
+                         [600, 1200])
+        markers, feedback = lines(shaft_rpm=600, shaft_harmonics_count=10)
+        self.assertEqual(len(markers), 3)
+        self.assertIn("above Nyquist", str(feedback))
+        self.assertEqual(lines()[0], [])
+        markers, feedback = lines(shaft_rpm=-5)
+        self.assertEqual(markers, [])
+        self.assertIn("Shaft markers hidden", str(feedback))
+        self.assertEqual(len(self.analyze(shaft_rpm=600, shaft_harmonics_count=0)[0].layout.shapes), 0)
+
+    def test_harmonic_axis_limit_and_rpm_default(self):
+        self.assertTrue(update_limit_harmonics(1752))
+        self.assertFalse(update_limit_harmonics(None))
+        self.assertFalse(update_limit_harmonics(0))
+        spectrum, _, _ = self.analyze(
+            shaft_rpm=600, shaft_harmonics_count=3, limit_to_harmonics=True
+        )
+        self.assertEqual(list(spectrum.layout.xaxis.range), [0, 30])
+        rpm_spectrum, _, _ = self.analyze(
+            shaft_rpm=600, shaft_harmonics_count=3, limit_to_harmonics=True, freq_unit="rpm"
+        )
+        self.assertEqual(list(rpm_spectrum.layout.xaxis.range), [0, 1800])
+        nyquist_spectrum, _, _ = self.analyze(
+            shaft_rpm=600, shaft_harmonics_count=4, limit_to_harmonics=True
+        )
+        self.assertEqual(list(nyquist_spectrum.layout.xaxis.range), [0, 32])
+        unlimited_spectrum, _, _ = self.analyze(shaft_rpm=600, limit_to_harmonics=False)
+        self.assertIsNone(unlimited_spectrum.layout.xaxis.range)
+
+    def test_bearing_frequency_display_tracks_shaft_speed(self):
+        self.assertIsNone(update_bearing_frequency_display(None))
+        displayed = update_bearing_frequency_display(1752)
+        self.assertEqual(len(displayed), 4)
+        self.assertIn("11.6 Hz", str(displayed))
+        self.assertIn("104.7 Hz", str(displayed))
+        self.assertIn("CWRU drive-end SKF 6205", str(displayed))
+
+    def test_fault_power_display_renders_selected_channel_values(self):
+        display = update_fault_power_display(
+            self.memory, "signal", 64, 64, None, "full", self.filtered,
+            "raw", "signal", 60,
+        )
+        self.assertEqual(len(display.children[2].children[1].children), 4)
+        self.assertIn("signal (raw)", str(display))
+        self.assertIn("Power (m/s2)²", str(display))
+        self.assertIsNone(update_fault_power_display(
+            self.memory, "signal", 64, 64, None, "full", self.filtered,
+            "raw", "signal", None,
+        ))
+
+    def test_analysis_settings_are_collapsible_and_open_by_default(self):
+        analysis_section = right_panel.children[0]
+        self.assertTrue(analysis_section.open)
+        self.assertEqual(analysis_section.children[0].children, "Analysis")
+
+    def test_bearing_markers_are_hoverable_on_spectrum_and_spectrogram(self):
+        spectrum, spectrogram, _ = self.analyze(shaft_rpm=60)
+        labels = {"FTF", "BPFO", "BPFI", "BSF"}
+        markers = {trace.name: trace for trace in spectrum.data if trace.name in labels}
+        self.assertEqual(set(markers), labels)
+        for label, trace in markers.items():
+            self.assertIn(label, trace.hovertemplate)
+        spec_markers = {trace.name: trace for trace in spectrogram.data if trace.name in labels}
+        self.assertEqual(set(spec_markers), labels)
+        for label, trace in spec_markers.items():
+            self.assertIn(label, trace.hovertemplate)
+        rpm_spectrum, _, _ = self.analyze(shaft_rpm=60, freq_unit="rpm")
+        rpm_ftf = next(trace for trace in rpm_spectrum.data if trace.name == "FTF")
+        self.assertAlmostEqual(rpm_ftf.x[0], markers["FTF"].x[0] * 60)
+
+    def test_shaft_speed_is_read_from_file_metadata(self):
+        self.assertEqual(recorded_rpm({"X109RPM": "1796", "Title": "x"}), 1796)
+        self.assertIsNone(recorded_rpm({"Title": "x", "X1RPM": "0"}))
+        self.assertIsNone(recorded_rpm(None))
+        self.assertIsNone(update_shaft_speed(None))
+        memory = recording()
+        memory["data"]["attrs"] = {"X109RPM": "1796"}
+        self.assertEqual(update_shaft_speed(memory), 1796)
 
     def test_spectrum_axis_switches_to_rpm(self):
         hz = self.analyze()[0].data[0]

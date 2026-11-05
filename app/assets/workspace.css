@@ -278,6 +278,80 @@ body {
     margin-bottom: 0.25rem;
 }
 
+.analysis-settings > summary {
+    cursor: pointer;
+}
+
+.settings-harmonics-field {
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1fr);
+}
+
+.settings-harmonics-label {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.15rem 0.4rem;
+    min-width: 0;
+}
+
+.settings-harmonics-label > .settings-label {
+    display: inline-flex;
+    margin: 0;
+}
+
+.harmonics-limit-switch {
+    display: inline-flex;
+    margin: 0;
+}
+
+.harmonics-limit-switch .form-check-label {
+    font-size: 0.72rem;
+    white-space: nowrap;
+}
+
+.bearing-frequencies {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.25rem;
+    margin: -0.05rem 0 0.3rem;
+    color: #ced4da;
+    font-size: 0.7rem;
+}
+
+.fault-power-display {
+    margin-top: 0.6rem;
+}
+
+.fault-power-table {
+    width: 100%;
+    margin-bottom: 0.4rem;
+    font-size: 0.72rem;
+}
+
+.fault-power-table th,
+.fault-power-table td {
+    padding: 0.25rem 0.35rem;
+    border-bottom: 1px solid #444;
+}
+
+.fault-power-table th:not(:first-child),
+.fault-power-table td:not(:first-child) {
+    text-align: right;
+}
+
+.fault-power-note {
+    margin: 0 0 0.35rem;
+    color: #adb5bd;
+    font-size: 0.7rem;
+}
+
+.bearing-frequency-value {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.2rem;
+    min-width: 0;
+}
+
 .settings-switch .form-check {
     min-height: 0;
     margin: 0;

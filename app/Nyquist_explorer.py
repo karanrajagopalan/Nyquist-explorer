@@ -12,8 +12,9 @@ from scipy.fft import next_fast_len
 
 from left_panel import compact_feedback, file_details, files_location, filter_panel, right_panel
 from utils import (
-    apply_filter, automatic_fir_settings, calculate_spectrogram, calculate_spectrum, get_ftaps,
-    interval_indices, number, parse_contents, samples_array, sampling_rate,
+    apply_filter, automatic_fir_settings, bearing_fault_bin_power, bearing_fault_frequencies,
+    calculate_spectrogram, calculate_spectrum, get_ftaps, interval_indices, number,
+    parse_contents, recorded_rpm, samples_array, sampling_rate, shaft_harmonics,
 )
 
 logger = logging.getLogger(__name__)
@@ -407,6 +408,101 @@ def update_selection(relayout, memory, selected, fs, reset):
     return dash.no_update
 
 
+@app.callback(Output("shaft_rpm", "value"), Input("memory1", "data"))
+def update_shaft_speed(memory):
+    return recorded_rpm(memory["data"]["attrs"]) if memory else None
+
+
+@app.callback(Output("limit_harmonics", "value"), Input("shaft_rpm", "value"))
+def update_limit_harmonics(shaft_rpm):
+    try:
+        return number(shaft_rpm, "Shaft speed") > 0
+    except ValueError:
+        return False
+
+
+@app.callback(Output("bearing_frequencies", "children"), Input("shaft_rpm", "value"))
+def update_bearing_frequency_display(shaft_rpm):
+    if shaft_rpm in (None, ""):
+        return None
+    try:
+        frequencies = bearing_fault_frequencies(shaft_rpm)
+    except ValueError:
+        return None
+    return [
+        html.Div([
+            html.Span(label),
+            html.Span(f"{frequency:.1f} Hz"),
+        ], className="bearing-frequency-value", title="CWRU drive-end SKF 6205")
+        for label, frequency in frequencies.items()
+    ]
+
+
+@app.callback(
+    Output("fault_power_display", "children"),
+    Input("memory1", "data"), Input("var_list_radio", "value"), Input("fs", "value"),
+    Input("nfft", "value"), Input("selection", "data"), Input("interval_mode", "value"),
+    Input("filt_x_mem", "data"), Input("spec_source", "value"),
+    Input("spec_channel", "value"), Input("shaft_rpm", "value"),
+)
+def update_fault_power_display(memory, selected, fs, nfft, selection, interval_mode,
+                               filtered_data, spec_source, spec_channel, shaft_rpm):
+    if not memory or shaft_rpm in (None, ""):
+        return None
+    try:
+        names = selected_channels(memory, selected)
+        fs = sampling_rate(fs)
+        if not filtered_data or "error" in filtered_data:
+            return None
+        if filtered_data.get("context") != [memory["id"], names, fs]:
+            return None
+        raws = {name: channel_samples(memory, name, minimum=2) for name in names}
+        filtered = filtered_data["filtered"]
+        count = min(len(values) for values in raws.values())
+        if filtered is not None:
+            count = min(count, *(len(values) for values in filtered.values()))
+        start, stop = interval_indices(count, fs, interval_mode, selection)
+        if spec_source not in {"raw", "filtered"}:
+            return None
+        if spec_source == "filtered" and filtered is None:
+            return None
+        spec_channel = spec_channel if spec_channel in names else names[0]
+        samples = raws[spec_channel] if spec_source == "raw" else np.asarray(filtered[spec_channel])
+        estimates, bin_width = bearing_fault_bin_power(samples[start:stop], shaft_rpm, nfft, fs)
+        units = channel_units(channel_data(memory, spec_channel))
+    except ValueError:
+        return None
+
+    visible = [(label, estimate) for label, estimate in estimates.items()
+               if estimate["frequency"] < fs / 2]
+    if not visible:
+        return html.Div("All bearing frequencies are at or above Nyquist.", className="fault-power-note")
+    rows = [
+        html.Tr([
+            html.Th(label, scope="row"),
+            html.Td(f"{estimate['frequency']:.1f} Hz"),
+            html.Td(f"{estimate['bin_frequency']:.1f} Hz"),
+            html.Td(f"{estimate['power']:.4g}"),
+        ])
+        for label, estimate in visible
+    ]
+    return html.Div([
+        html.H6("Fault-frequency power", className="settings-heading"),
+        html.P(
+            f"{spec_channel} ({spec_source}); nearest-bin PSD power, bin width {bin_width:.3g} Hz. "
+            f"Power units: ({units})².",
+            className="fault-power-note",
+        ),
+        html.Table([
+            html.Thead(html.Tr([
+                html.Th("Fault"), html.Th("Target"), html.Th("FFT bin"),
+                html.Th(f"Power ({units})²"),
+            ])),
+            html.Tbody(rows),
+        ], className="fault-power-table"),
+    ], className="fault-power-display")
+
+
 @app.callback(
     Output("spec_channel", "options"), Output("spec_channel", "value"),
     Input("var_list_radio", "value"), dash.State("spec_channel", "value"), dash.State("memory1", "data"),
@@ -427,11 +523,13 @@ def update_spectrogram_channel(selected, current, memory):
     Input("filt_x_mem", "data"), Input("spectrum_mode", "value"),
     Input("spec_window", "value"), Input("spec_nfft", "value"),
     Input("spec_overlap", "value"), Input("spec_source", "value"), Input("freq_unit", "value"),
-    Input("spec_channel", "value"),
+    Input("spec_channel", "value"), Input("shaft_rpm", "value"), Input("shaft_harmonics", "value"),
+    Input("limit_harmonics", "value"),
 )
 def update_fd_plot(memory, selected, fs, nfft, selection, interval_mode, filtered_data,
                    spectrum_mode, spec_window, spec_nfft, spec_overlap, spec_source, freq_unit,
-                   spec_channel=None):
+                   spec_channel=None, shaft_rpm=None, shaft_harmonics_count=15,
+                   limit_to_harmonics=False):
     try:
         names = selected_channels(memory, selected)
         fs = sampling_rate(fs)
@@ -483,6 +581,59 @@ def update_fd_plot(memory, selected, fs, nfft, selection, interval_mode, filtere
         + (" Raw and filtered spectra use the same available interval." if filtered is not None else ""),
         "info",
     )]
+    if shaft_rpm not in (None, ""):
+        try:
+            shaft_hz, orders = shaft_harmonics(shaft_rpm, shaft_harmonics_count, fs)
+        except ValueError as exc:
+            feedback.append(alert(f"Shaft markers hidden: {exc}", "warning"))
+        else:
+            for order in orders:
+                figure.add_vline(
+                    x=order * shaft_hz * scale, line=dict(color="#facc15", width=1, dash="dot"),
+                    annotation_text=f"{order}X", annotation_position="top",
+                    annotation_font=dict(color="#facc15", size=11),
+                )
+            note = f"Shaft speed {shaft_hz * 60:g} RPM ({shaft_hz:g} Hz), markers at {orders[0]}X–{orders[-1]}X."
+            if orders[-1] < number(shaft_harmonics_count, "Harmonics", integer=True):
+                note += " Higher orders are above Nyquist and omitted."
+            feedback.append(alert(note, "info"))
+    if shaft_rpm not in (None, ""):
+        try:
+            fault_frequencies = bearing_fault_frequencies(shaft_rpm)
+        except ValueError as exc:
+            feedback.append(alert(f"Bearing markers hidden: {exc}", "warning"))
+        else:
+            spectrum_y = np.concatenate([np.asarray(trace.y, dtype=float) for trace in figure.data])
+            y_min, y_max = float(np.min(spectrum_y)), float(np.max(spectrum_y))
+            if y_min == y_max:
+                y_max = y_min + 1
+            colors = {"FTF": "#f97316", "BPFO": "#22c55e", "BPFI": "#38bdf8", "BSF": "#e879f9"}
+            marked = []
+            for label, frequency in fault_frequencies.items():
+                if frequency >= fs / 2:
+                    continue
+                marked.append(label)
+                axis_frequency = frequency * scale
+                figure.add_trace(go.Scatter(
+                    x=[axis_frequency, axis_frequency], y=[y_min, y_max], mode="lines",
+                    name=label, showlegend=False,
+                    line=dict(color=colors[label], width=1, dash="dash"),
+                    hovertemplate=f"{label}: {axis_frequency:g} {'RPM' if scale == 60 else 'Hz'}<extra></extra>",
+                ))
+            note = "CWRU SKF 6205 bearing markers: " + ", ".join(marked) + "."
+            if len(marked) < len(fault_frequencies):
+                note += " Frequencies at or above Nyquist are omitted."
+            feedback.append(alert(note, "info"))
+    if limit_to_harmonics and shaft_rpm not in (None, ""):
+        try:
+            shaft_hz, _ = shaft_harmonics(shaft_rpm, shaft_harmonics_count, fs)
+            maximum_frequency = min(
+                shaft_hz * number(shaft_harmonics_count, "Harmonics", minimum=1, integer=True), fs / 2
+            )
+        except ValueError as exc:
+            feedback.append(alert(f"Harmonic axis limit unavailable: {exc}", "warning"))
+        else:
+            figure.update_xaxes(range=[0, maximum_frequency * scale])
     spec_channel = spec_channel if spec_channel in names else names[0]
     try:
         if spec_source not in {"raw", "filtered"}:
@@ -500,6 +651,23 @@ def update_fd_plot(memory, selected, fs, nfft, selection, interval_mode, filtere
             )),
             f"Spectrogram ({spec_source}, {spec_channel})", "Time (s)", "Frequency (Hz)",
         )
+        if shaft_rpm not in (None, ""):
+            try:
+                fault_frequencies = bearing_fault_frequencies(shaft_rpm)
+            except ValueError:
+                pass
+            else:
+                colors = {"FTF": "#f97316", "BPFO": "#22c55e", "BPFI": "#38bdf8", "BSF": "#e879f9"}
+                time_start, time_end = start / fs, stop / fs
+                for label, frequency in fault_frequencies.items():
+                    if frequency >= fs / 2:
+                        continue
+                    spectrogram.add_trace(go.Scatter(
+                        x=[time_start, time_end], y=[frequency, frequency], mode="lines",
+                        name=label, showlegend=False,
+                        line=dict(color=colors[label], width=1, dash="dash"),
+                        hovertemplate=f"{label}: {frequency:g} Hz<extra></extra>",
+                    ))
         if segment < float(spec_window):
             feedback.append(alert(
                 f"Short interval: spectrogram window reduced to {segment} samples.", "info"

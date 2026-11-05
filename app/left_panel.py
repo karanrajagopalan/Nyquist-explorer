@@ -98,38 +98,57 @@ file_details = html.Div(
 
 right_panel = html.Div(
     [
-        html.H6("Analysis", className="settings-heading"),
-        numeric_input("Sample rate (Hz)", "fs", 50000, minimum=0,
-                      help_text="Uses channel Fs metadata when available. You can override it."),
-        dropdown("Analyze", "interval_mode", [
-            {"label": "Full recording", "value": "full"},
-            {"label": "Selected interval", "value": "selected"},
-        ], "full", "For a selected interval, zoom horizontally in the time-series plot."),
-        dbc.Button("Reset selection", id="reset_selection", n_clicks=0, size="sm",
-                   color="secondary", outline=True, className="settings-reset"),
-        numeric_input("Min. FFT size", "nfft", 2048, minimum=2, step=1,
-                      help_text="Zero-pads shorter intervals. Longer intervals use all samples, never truncate."),
-        dropdown("Spectrum", "spectrum_mode", [
-            {"label": "Raw magnitude", "value": "raw"},
-            {"label": "Amplitude (peak)", "value": "amplitude"},
-            {"label": "PSD", "value": "psd"},
-        ], "raw", "Raw: unnormalized FFT magnitude. Amplitude: single-sided peak amplitude. "
-           "PSD: power spectral density in signal-units squared per Hz."),
-        dropdown("Frequency axis", "freq_unit", [
-            {"label": "Hz", "value": "hz"},
-            {"label": "RPM", "value": "rpm"},
-        ], "hz", "Show the spectrum frequency axis in Hz or RPM (1 Hz = 60 RPM)."),
-        html.H6("Spectrogram", className="settings-heading"),
-        numeric_input("Window samples", "spec_window", 256, minimum=2, step=1,
-                      help_text="Hamming window length in samples. Short intervals reduce this automatically."),
-        numeric_input("FFT size", "spec_nfft", 512, minimum=2, step=1,
-                      help_text="Independent of the spectrum FFT. Must be at least the requested window length."),
-        numeric_input("Overlap (%)", "spec_overlap", 50, minimum=0,
-                      help_text="Percentage shared by neighboring windows; must be below 100%."),
-        dropdown("Source", "spec_source", [
-            {"label": "Raw signal", "value": "raw"},
-            {"label": "Filtered signal", "value": "filtered"},
-        ], "raw", "Choose raw samples or enable the FIR filter to analyze its output."),
+        html.Details([
+            html.Summary("Analysis", className="settings-heading"),
+            numeric_input("Sample rate (Hz)", "fs", 50000, minimum=0,
+                          help_text="Uses channel Fs metadata when available. You can override it."),
+            dropdown("Analyze", "interval_mode", [
+                {"label": "Full recording", "value": "full"},
+                {"label": "Selected interval", "value": "selected"},
+            ], "full", "For a selected interval, zoom horizontally in the time-series plot."),
+            dbc.Button("Reset selection", id="reset_selection", n_clicks=0, size="sm",
+                       color="secondary", outline=True, className="settings-reset"),
+            numeric_input("Min. FFT size", "nfft", 2048, minimum=2, step=1,
+                          help_text="Zero-pads shorter intervals. Longer intervals use all samples, never truncate."),
+            dropdown("Spectrum", "spectrum_mode", [
+                {"label": "Raw magnitude", "value": "raw"},
+                {"label": "Amplitude (peak)", "value": "amplitude"},
+                {"label": "PSD", "value": "psd"},
+            ], "raw", "Raw: unnormalized FFT magnitude. Amplitude: single-sided peak amplitude. "
+               "PSD: power spectral density in signal-units squared per Hz."),
+            dropdown("Frequency axis", "freq_unit", [
+                {"label": "Hz", "value": "hz"},
+                {"label": "RPM", "value": "rpm"},
+            ], "hz", "Show the spectrum frequency axis in Hz or RPM (1 Hz = 60 RPM)."),
+            numeric_input("Shaft speed (RPM)", "shaft_rpm", None, minimum=0,
+                          help_text="Marks shaft harmonics and CWRU SKF 6205 bearing frequencies on both plots. "
+                                    "Filled from file RPM metadata when present; clear to hide the markers."),
+            html.Div(id="bearing_frequencies", className="bearing-frequencies", role="status"),
+            html.Div([
+                html.Div([
+                    html.Div([
+                        dbc.Label("Harmonics", html_for="shaft_harmonics"),
+                        info_tip("shaft_harmonics", "Number of shaft orders to mark, including 1X. "
+                                 "Orders above Nyquist are omitted.", "Harmonics"),
+                    ], className="settings-label"),
+                    dbc.Switch(id="limit_harmonics", label="Limit to harmonics", value=False,
+                               className="harmonics-limit-switch"),
+                ], className="settings-harmonics-label"),
+                dbc.Input(id="shaft_harmonics", type="number", value=5, min=1, step=1,
+                          debounce=True, size="sm"),
+            ], className="settings-field settings-harmonics-field"),
+            html.H6("Spectrogram", className="settings-heading"),
+            numeric_input("Window samples", "spec_window", 256, minimum=2, step=1,
+                          help_text="Hamming window length in samples. Short intervals reduce this automatically."),
+            numeric_input("FFT size", "spec_nfft", 512, minimum=2, step=1,
+                          help_text="Independent of the spectrum FFT. Must be at least the requested window length."),
+            numeric_input("Overlap (%)", "spec_overlap", 50, minimum=0,
+                          help_text="Percentage shared by neighboring windows; must be below 100%."),
+            dropdown("Source", "spec_source", [
+                {"label": "Raw signal", "value": "raw"},
+                {"label": "Filtered signal", "value": "filtered"},
+            ], "raw", "Choose raw samples or enable the FIR filter to analyze its output."),
+        ], open=True, className="analysis-settings"),
     ]
 )
 
@@ -176,5 +195,6 @@ filter_panel = html.Div(
             ],
             className="filter-preview",
         ),
+        html.Div(id="fault_power_display"),
     ]
 )

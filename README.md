@@ -1,6 +1,8 @@
 # Nyquist explorer
 
 A simple vibration analysis tool. Upload a recording and explore its time series, spectrum, and spectrogram, with optional FIR filtering.
+The app is deployed in plotly dash server - https://vibration-analysis.plotly.app/
+(Only small .mat, .nfc, .csv files would work in the above deployed app due to memory constraint of the container)
 
 ![Nyquist explorer screenshot](image.png)
 
